@@ -23,8 +23,18 @@
 #include "stm32_eth.h"
 #endif
 
+#ifdef RT_USING_GDB
+#include <gdb_stub.h>
+#endif
+
 void rt_init_thread_entry(void* parameter)
 {
+    /* GDB STUB */
+#ifdef RT_USING_GDB
+    gdb_set_device("uart6");
+    gdb_start();
+#endif
+
     /* LwIP Initialization */
 #ifdef RT_USING_LWIP
     {
@@ -34,8 +44,6 @@ void rt_init_thread_entry(void* parameter)
         eth_system_device_init();
 
         rt_hw_stm32_eth_init();
-        /* re-init device driver */
-        rt_device_init_all();
 
         /* init lwip system */
         lwip_sys_init();

@@ -88,8 +88,50 @@ int cmd_mv(int argc, char** argv)
     }
     else
     {
+		int fd;
+		char *dest = RT_NULL;
+
         rt_kprintf("%s => %s\n", argv[1], argv[2]);
-		rename(argv[1], argv[2]);
+
+		fd = open(argv[2], O_DIRECTORY, 0);
+		if (fd >= 0)
+		{
+			char *src;
+			
+			close(fd);
+
+			/* it's a directory */			
+			dest = (char*)rt_malloc(DFS_PATH_MAX);
+			if (dest == RT_NULL)
+			{
+				rt_kprintf("out of memory\n");
+				return -RT_ENOMEM;
+			}
+
+			src = argv[1] + rt_strlen(argv[1]);
+			while (src != argv[1]) 
+			{
+				if (*src == '/') break;
+				src --;
+			}
+
+			rt_snprintf(dest, DFS_PATH_MAX - 1, "%s/%s", argv[2], src);
+		}
+		else
+		{
+			fd = open(argv[2], O_RDONLY, 0);
+			if (fd >= 0)
+			{
+				close(fd);
+				
+				unlink(argv[2]);
+			}
+
+			dest = argv[2];
+		}
+
+		rename(argv[1], dest);
+		if (dest != RT_NULL && dest != argv[2]) rt_free(dest);
     }
 
     return 0;
@@ -207,6 +249,7 @@ int cmd_ifconfig(int argc, char** argv)
 }
 FINSH_FUNCTION_EXPORT_ALIAS(cmd_ifconfig, __cmd_ifconfig, list the information of network interfaces);
 
+#ifdef RT_LWIP_TCP
 int cmd_netstat(int argc, char** argv)
 {
  	extern void list_tcps(void);
@@ -215,7 +258,7 @@ int cmd_netstat(int argc, char** argv)
 	return 0;
 }
 FINSH_FUNCTION_EXPORT_ALIAS(cmd_netstat, __cmd_netstat, list the information of TCP/IP);
-
+#endif
 #endif /* RT_USING_LWIP */
 
 int cmd_ps(int argc, char** argv)
@@ -233,6 +276,7 @@ int cmd_time(int argc, char** argv)
 }
 FINSH_FUNCTION_EXPORT_ALIAS(cmd_time, __cmd_time, Execute command with time.);
 
+#ifdef RT_USING_HEAP
 int cmd_free(int argc, char** argv)
 {
     extern void list_mem(void);
@@ -241,6 +285,7 @@ int cmd_free(int argc, char** argv)
     return 0;
 }
 FINSH_FUNCTION_EXPORT_ALIAS(cmd_free, __cmd_free, Show the memory usage in the system.);
+#endif
 
 #endif
 
