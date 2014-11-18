@@ -12,24 +12,41 @@ Env = None
 
 class Win32Spawn:
     def spawn(self, sh, escape, cmd, args, env):
+        # deal with the cmd build-in commands which cannot be used in
+        # subprocess.Popen
+        if cmd == 'del':
+            for f in args[1:]:
+                try:
+                    os.remove(f)
+                except Exception as e:
+                    print 'Error removing file: %s' % e
+                    return -1
+            return 0
+
         import subprocess
 
         newargs = string.join(args[1:], ' ')
         cmdline = cmd + " " + newargs
-        startupinfo = subprocess.STARTUPINFO()
 
-        proc = subprocess.Popen(cmdline, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, startupinfo=startupinfo, shell = False)
-        data, err = proc.communicate()
-        rv = proc.wait()
-        if data:
-            print data
-        if err:
-            print err
+        # Make sure the env is constructed by strings
+        _e = dict([(k, str(v)) for k, v in env.items()])
 
-        if rv:
-            return rv
-        return 0
+        # Windows(tm) CreateProcess does not use the env passed to it to find
+        # the executables. So we have to modify our own PATH to make Popen
+        # work.
+        old_path = os.environ['PATH']
+        os.environ['PATH'] = _e['PATH']
+
+        try:
+            proc = subprocess.Popen(cmdline, env=_e, shell=False)
+        except Exception as e:
+            print 'Error in calling:\n%s' % cmdline
+            print 'Exception: %s: %s' % (e, os.strerror(e.errno))
+            return e.errno
+        finally:
+            os.environ['PATH'] = old_path
+
+        return proc.wait()
 
 def PrepareBuilding(env, root_directory, has_libcpu=False, remove_components = []):
     import SCons.cpp
@@ -59,11 +76,11 @@ def PrepareBuilding(env, root_directory, has_libcpu=False, remove_components = [
         env['LIBDIRPREFIX'] = '--userlibpath '
 
     # patch for win32 spawn
-    if env['PLATFORM'] == 'win32' and rtconfig.PLATFORM == 'gcc':
+    if env['PLATFORM'] == 'win32':
         win32_spawn = Win32Spawn()
         win32_spawn.env = env
         env['SPAWN'] = win32_spawn.spawn
-    
+
     if env['PLATFORM'] == 'win32':
         os.environ['PATH'] = rtconfig.EXEC_PATH + ";" + os.environ['PATH']
     else:
@@ -192,18 +209,23 @@ def PrepareBuilding(env, root_directory, has_libcpu=False, remove_components = [
             LINKCOMSTR = 'LINK $TARGET'
         )
 
+    # we need to seperate the variant_dir for BSPs and the kernels. BSPs could
+    # have their own components etc. If they point to the same folder, SCons
+    # would find the wrong source code to compile.
+    bsp_vdir = 'build/bsp'
+    kernel_vdir = 'build/kernel'
     # board build script
-    objs = SConscript('SConscript', variant_dir='build', duplicate=0)
-    Repository(Rtt_Root)
+    objs = SConscript('SConscript', variant_dir=bsp_vdir, duplicate=0)
     # include kernel
-    objs.extend(SConscript(Rtt_Root + '/src/SConscript', variant_dir='build/src', duplicate=0))
+    objs.extend(SConscript(Rtt_Root + '/src/SConscript', variant_dir=kernel_vdir + '/src', duplicate=0))
     # include libcpu
     if not has_libcpu:
-        objs.extend(SConscript(Rtt_Root + '/libcpu/SConscript', variant_dir='build/libcpu', duplicate=0))
+        objs.extend(SConscript(Rtt_Root + '/libcpu/SConscript',
+                    variant_dir=kernel_vdir + '/libcpu', duplicate=0))
 
     # include components
     objs.extend(SConscript(Rtt_Root + '/components/SConscript',
-                           variant_dir='build/components',
+                           variant_dir=kernel_vdir + '/components',
                            duplicate=0,
                            exports='remove_components'))
 
@@ -415,12 +437,6 @@ def DoBuilding(target, objects):
 
                 break
     else:
-        # merge the repeated items in the Env
-        if Env.has_key('CPPPATH')   : Env['CPPPATH'] = list(set(Env['CPPPATH']))
-        if Env.has_key('CPPDEFINES'): Env['CPPDEFINES'] = list(set(Env['CPPDEFINES']))
-        if Env.has_key('LIBPATH')   : Env['LIBPATH'] = list(set(Env['LIBPATH']))
-        if Env.has_key('LIBS')      : Env['LIBS'] = list(set(Env['LIBS']))
-
         program = Env.Program(target, objects)
 
     EndBuilding(target, program)
@@ -479,6 +495,9 @@ def EndBuilding(target, program = None):
         CscopeDatabase(Projects)
 
 def SrcRemove(src, remove):
+    if not src:
+        return
+
     if type(src[0]) == type('str'):
         for item in src:
             if os.path.basename(item) in remove:

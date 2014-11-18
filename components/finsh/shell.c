@@ -70,10 +70,11 @@ const char* finsh_get_prompt()
 #endif
     strcpy(finsh_prompt, _PROMPT);
 
-#ifdef DFS_USING_WORKDIR
+#if defined(RT_USING_DFS) && defined(DFS_USING_WORKDIR)
     /* get current working directory */
     getcwd(&finsh_prompt[rt_strlen(finsh_prompt)], RT_CONSOLEBUF_SIZE - rt_strlen(finsh_prompt));
 #endif
+
     strcat(finsh_prompt, ">");
 
     return finsh_prompt;
@@ -530,6 +531,12 @@ void finsh_thread_entry(void* parameter)
             ch = 0;
             shell->line_position ++;
             shell->line_curpos++;
+			if (shell->line_position >= 80) 
+			{
+				/* clear command line */
+				shell->line_position = 0;
+				shell->line_curpos = 0;
+			}
         } /* end of device read */
     }
 }
